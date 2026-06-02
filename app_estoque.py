@@ -10,6 +10,62 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- SISTEMA DE LOGIN SEGURO ---
+def realizar_login():
+    """Exibe o formulário de login e valida a senha"""
+    st.markdown(
+        """
+        <style>
+        .login-box {
+            max-width: 450px;
+            margin: 80px auto;
+            padding: 40px;
+            border-radius: 12px;
+            background-color: #1e293b;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            border: 1px solid #334155;
+            text-align: center;
+        }
+        </style>
+        """, 
+        unsafe_allow_html=True
+    )
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown('<div class="login-box">', unsafe_allow_html=True)
+        st.title("🔒 Acesso Restrito")
+        st.write("Vigilância em Saúde - Controle de Estoque")
+        
+        # Insira a senha que você deseja usar para os operadores
+        senha_correta = "vigilancia2026"  
+        
+        senha_digitada = st.text_input("Digite a senha de acesso:", type="password")
+        btn_entrar = st.button("Entrar no Sistema", use_container_width=True)
+        
+        if btn_entrar:
+            if senha_digitada == senha_correta:
+                st.session_state["autenticado"] = True
+                st.success("Acesso autorizado! Carregando...")
+                st.rerun()
+            else:
+                st.error("Senha incorreta. Tente novamente.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# Inicializa a variável de controle da sessão
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+
+# Se NÃO estiver autenticado, exibe a tela de login e encerra o script por aqui
+if not st.session_state["autenticado"]:
+    realizar_login()
+    st.stop()  # Impede o restante do código de rodar na página
+
+# ==============================================================================
+# SE O USUÁRIO FOR AUTENTICADO, O RESTANTE DO SEU CÓDIGO RODA DAQUI PARA BAIXO
+# ==============================================================================
+
 # --- FUNÇÕES DO BANCO DE DADOS ---
 def obter_conexao():
     return sqlite3.connect('estoque_testes_v5.db')
@@ -19,7 +75,6 @@ def inicializar_banco():
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON;")
     
-    # Tabela de Testes
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS testes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +83,6 @@ def inicializar_banco():
         )
     ''')
     
-    # Tabela de Unidades Cadastradas
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS unidades_saude (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,7 +90,6 @@ def inicializar_banco():
         )
     ''')
     
-    # Tabela de Lotes (Entradas)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS lotes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +103,6 @@ def inicializar_banco():
         )
     ''')
     
-    # Tabela de Movimentações (Saídas)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS movimentacoes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,7 +116,6 @@ def inicializar_banco():
     ''')
     conn.commit()
 
-    # --- CARGA INICIAL DE DADOS ---
     cursor.execute("SELECT COUNT(*) FROM testes")
     if cursor.fetchone()[0] == 0:
         dados_vigilancia = [
@@ -88,9 +139,6 @@ def inicializar_banco():
             
             for qtd, validade in lotes:
                 cursor.execute('''
-                    INSERT INTO lotes (teste_id, quantidade_inicial, quantidade_atual, data_entrada, origen, validade)
-                    VALUES (?, ?, ?, ?, 'SEMSA', ?)
-                ''' if 'origen' in locals() else '''
                     INSERT INTO lotes (teste_id, quantidade_inicial, quantidade_atual, data_entrada, origem, validade)
                     VALUES (?, ?, ?, ?, 'SEMSA', ?)
                 ''', (t_id, qtd, qtd, data_hoje, validade))
@@ -102,11 +150,18 @@ def inicializar_banco():
         conn.commit()
     conn.close()
 
-# Inicializa o banco ao carregar o script
+# Inicializa banco
 inicializar_banco()
 
 # --- MENU LATERAL (Navegação) ---
 st.sidebar.title("⚙️ ESTOQUE V5")
+st.sidebar.write("Usuário: **Operador Vigilância**")
+
+# Botão de Logoff no menu lateral
+if st.sidebar.button("🔒 Sair do Sistema"):
+    st.session_state["autenticado"] = False
+    st.rerun()
+
 st.sidebar.markdown("---")
 menu = st.sidebar.radio(
     "Navegação",
@@ -126,7 +181,6 @@ menu = st.sidebar.radio(
 if menu == "📊 Painel Geral & Alertas":
     st.title("Painel Geral - Vigilância em Saúde")
     
-    # --- Seção de Alertas ---
     st.subheader("⚠️ ALERTAS DE VENCIMENTO (Próximos 90 dias)")
     
     conn = obter_conexao()
@@ -162,7 +216,6 @@ if menu == "📊 Painel Geral & Alertas":
         
     st.markdown("---")
     
-    # --- Tabela de Estoque Atual ---
     st.subheader("Estoque Central Disponível")
     cursor.execute('''
         SELECT t.nome, SUM(l.quantidade_atual), t.unidades_por_caixa, MIN(l.validade)
@@ -267,7 +320,6 @@ elif menu == "📥 Entrada de Carga (Lote)":
             total_unidades = int(caixas * fator)
             st.text_input("Total em Unidades (Calculado automaticamente):", value=str(total_unidades), disabled=True)
             
-        # O Streamlit possui um calendário nativo maravilhoso, eliminando a necessidade de máscaras de texto!
         validade_data = st.date_input("Data de Validade:", min_value=datetime.today())
         
         if st.button("Efetuar Entrada"):
@@ -311,7 +363,6 @@ elif menu == "📤 Enviar para Unidade":
         teste_selecionado = st.selectbox("Selecione o Teste:", list(dict_testes.keys()))
         unidade_destino = st.selectbox("Selecione a Unidade de Destino:", lista_unidades)
         
-        # Carrega validades disponíveis com estoque ativo
         conn = obter_conexao()
         cursor = conn.cursor()
         cursor.execute('''
@@ -343,7 +394,6 @@ elif menu == "📤 Enviar para Unidade":
                     conn = obter_conexao()
                     cursor = conn.cursor()
                     
-                    # Verificar se o lote específico atende
                     cursor.execute('''
                         SELECT l.id, l.quantidade_atual FROM lotes l JOIN testes t ON l.teste_id = t.id
                         WHERE t.nome = ? AND l.validade = ? AND l.quantidade_atual > 0
@@ -360,11 +410,9 @@ elif menu == "📤 Enviar para Unidade":
                         else:
                             data_atual = datetime.today().strftime('%d/%m/%Y')
                             
-                            # Pegar ID da unidade
                             cursor.execute("SELECT id FROM unidades_saude WHERE nome = ?", (unidade_destino,))
                             unidade_id = cursor.fetchone()[0]
                             
-                            # Atualizar lote e registrar movimentação
                             cursor.execute("UPDATE lotes SET quantidade_atual = ? WHERE id = ?", (qtd_atual - qtd_solicitada, lote_id))
                             cursor.execute("INSERT INTO movimentacoes (lote_id, unidade_id, quantidade_saida, data_saida) VALUES (?, ?, ?, ?)", 
                                            (lote_id, unidade_id, qtd_solicitada, data_atual))
