@@ -46,8 +46,6 @@ if not st.session_state["autenticado"]:
     realizar_login()
     st.stop() # Interrompe a execução do restante do app se não logar
 
-# --- RESTANTE DO SEU CÓDIGO DO SISTEMA ---
-st.title("🎉 Bem-vindo ao Painel Principal!")
 
 # ==============================================================================
 # SE O USUÁRIO FOR AUTENTICADO, O RESTANTE DO SEU CÓDIGO RODA DAQUI PARA BAIXO
