@@ -158,6 +158,131 @@ menu = st.sidebar.radio(
         "📤 Enviar para Unidade",
         "🔍 Histórico por Unidade"
     ]
+    elif menu == "✏️ Gerenciar Estoque":
+    st.title("✏️ Gerenciar e Modificar Estoque")
+    st.write("Exiba, altere ou remova registros de testes e lotes cadastrados no sistema.")
+
+    # Criar abas internas para separar a edição de Lotes e de Tipos de Testes
+    aba_lotes, aba_testes = st.tabs(["📦 Lotes em Estoque", "🧪 Tipos de Testes"])
+
+    # --- ABA: GERENCIAR LOTES ---
+    with aba_lotes:
+        conn = obter_conexao()
+        # Busca os lotes trazendo o nome do teste associado
+        query_lotes = """
+            SELECT l.id, t.nome as teste, l.origem as lote_fabricante, 
+                   l.quantidade_atual, l.validade 
+            FROM lotes l
+            JOIN testes t ON t.id = l.teste_id
+            ORDER BY t.nome, l.validade
+        """
+        df_lotes = pd.read_sql(query_lotes, conn)
+        conn.close()
+
+        if df_lotes.empty:
+            st.warning("Nenhum lote cadastrado para editar ou excluir.")
+        else:
+            # Seleção do lote que o usuário deseja modificar
+            lista_opcoes = [f"ID {row['id']} - {row['teste']} ({row['lote_fabricante']})" for _, row in df_lotes.iterrows()]
+            selecionado = st.selectbox("Selecione o lote que deseja gerenciar:", lista_opcoes)
+            
+            # Extrai o ID numérico da string selecionada
+            lote_id = int(selecionado.split(" ")[1])
+            dados_lote = df_lotes[df_lotes['id'] == lote_id].iloc[0]
+
+            # Formulário de Edição / Ações
+            col_edit, col_del = st.columns([2, 1])
+
+            with col_edit:
+                with st.container(border=True):
+                    st.subheader("📝 Editar Dados do Lote")
+                    novo_lote_fab = st.text_input("Lote / Fabricante:", value=dados_lote['lote_fabricante'])
+                    nova_qtd = st.number_input("Quantidade Atual em Estoque:", value=int(dados_lote['quantidade_atual']), min_value=0)
+                    nova_validade = st.text_input("Data de Validade (AAAA-MM-DD):", value=dados_lote['validade'])
+                    
+                    if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
+                        conn = obter_conexao()
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            UPDATE lotes 
+                            SET origem = ?, quantidade_atual = ?, validade = ? 
+                            WHERE id = ?
+                        """, (novo_lote_fab, nova_qtd, nova_validade, lote_id))
+                        conn.commit()
+                        conn.close()
+                        st.success("Lote atualizado com sucesso!")
+                        st.rerun()
+
+            with col_del:
+                with st.container(border=True):
+                    st.subheader("⚠️ Zona de Perigo")
+                    st.write("A exclusão é permanente e removerá o lote do histórico.")
+                    
+                    # Caixa de confirmação para evitar cliques acidentais
+                    confirmar = st.checkbox("Confirmo que desejo apagar este lote permanentemente.")
+                    
+                    if st.button("🗑️ Excluir Lote", type="secondary", use_container_width=True, disabled=not confirmar):
+                        conn = obter_conexao()
+                        cursor = conn.cursor()
+                        
+                        # Alerta: Se houver movimentações amarradas a esse lote, elas precisam ser apagadas antes (Restrição SQL)
+                        cursor.execute("DELETE FROM movimentacoes WHERE lote_id = ?", (lote_id,))
+                        cursor.execute("DELETE FROM lotes WHERE id = ?", (lote_id,))
+                        
+                        conn.commit()
+                        conn.close()
+                        st.success("Lote excluído com sucesso!")
+                        st.rerun()
+
+    # --- ABA: GERENCIAR TIPOS DE TESTES ---
+    with aba_testes:
+        conn = obter_conexao()
+        df_testes = pd.read_sql("SELECT id, nome, unidades_por_caixa FROM testes ORDER BY nome", conn)
+        conn.close()
+
+        if df_testes.empty:
+            st.warning("Nenhum tipo de teste cadastrado.")
+        else:
+            lista_testes = [f"ID {row['id']} - {row['nome']}" for _, row in df_testes.iterrows()]
+            selecionado_teste = st.selectbox("Selecione o Teste para gerenciar:", lista_testes)
+            
+            teste_id = int(selecionado_teste.split(" ")[1])
+            dados_teste = df_testes[df_testes['id'] == teste_id].iloc[0]
+
+            col_t_edit, col_t_del = st.columns([2, 1])
+
+            with col_t_edit:
+                with st.container(border=True):
+                    st.subheader("📝 Editar Nome/Apresentação")
+                    novo_nome = st.text_input("Nome do Teste:", value=dados_teste['nome']).upper()
+                    novas_unidades = st.number_input("Unidades por Caixa:", value=int(dados_teste['unidades_por_caixa']), min_value=1)
+                    
+                    if st.button("💾 Atualizar Teste", type="primary", use_container_width=True):
+                        conn = obter_conexao()
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE testes SET nome = ?, unidades_por_caixa = ? WHERE id = ?", (novo_nome, novas_unidades, teste_id))
+                        conn.commit()
+                        conn.close()
+                        st.success("Tipo de teste atualizado!")
+                        st.rerun()
+
+            with col_t_del:
+                with st.container(border=True):
+                    st.subheader("⚠️ Excluir Tipo")
+                    st.write("Isso apagará o nome do teste do sistema.")
+                    confirmar_t = st.checkbox("Confirmo que desejo apagar este tipo de teste.")
+                    
+                    if st.button("🗑️ Excluir Teste", type="secondary", use_container_width=True, disabled=not confirmar_t):
+                        try:
+                            conn = obter_conexao()
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM testes WHERE id = ?", (teste_id,))
+                            conn.commit()
+                            conn.close()
+                            st.success("Teste removido com sucesso!")
+                            st.rerun()
+                        except sqlite3.IntegrityError:
+                            st.error("Não é possível excluir este teste porque existem Lotes vinculados a ele. Apague os lotes primeiro.")
 )
 
 # ==========================================
