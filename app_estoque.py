@@ -39,7 +39,7 @@ def realizar_login():
         st.write("Vigilância em Saúde - Controle de Estoque")
         
         # Insira a senha que você deseja usar para os operadores
-        senha_correta = "vigilancia2026"  
+        senha_correta = "senha_correta = st.secrets["PASSWORD_SISTEMA"]"  
         
         senha_digitada = st.text_input("Digite a senha de acesso:", type="password")
         btn_entrar = st.button("Entrar no Sistema", use_container_width=True)
