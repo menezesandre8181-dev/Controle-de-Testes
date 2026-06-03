@@ -2,65 +2,52 @@ import sqlite3
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import streamlit as st
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(
-    page_title="Sistema de Vigilância em Saúde - Estoque V5",
-    page_icon="⚙️",
-    layout="wide"
-)
+# --- CONFIGURAÇÃO DA PÁGINA (Deve ser a primeira linha) ---
+st.set_page_config(page_title="Vigilância em Saúde - Login", page_icon="🔒", layout="wide")
 
-# --- SISTEMA DE LOGIN SEGURO ---
 def realizar_login():
-    """Exibe o formulário de login e valida a senha"""
-    st.markdown(
-        """
-        <style>
-        .login-box {
-            max-width: 450px;
-            margin: 80px auto;
-            padding: 40px;
-            border-radius: 12px;
-            background-color: #1e293b;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-            border: 1px solid #334155;
-            text-align: center;
-        }
-        </style>
-        """, 
-        unsafe_allow_html=True
-    )
-
-    col1, col2, col3 = st.columns([1, 2, 1])
+    # Recupera a senha dos segredos (Streamlit Secrets)
+    senha_correta = st.secrets["PASSWORD_SISTEMA"]
+    
+    # Criamos 3 colunas para centralizar o formulário no meio da tela
+    col1, col2, col3 = st.columns([1, 1.5, 1])
     
     with col2:
-        st.markdown('<div class="login-box">', unsafe_allow_html=True)
-        st.title("🔒 Acesso Restrito")
-        st.write("Vigilância em Saúde - Controle de Estoque")
+        st.write("") # Espaço em branco no topo para empurrar o bloco para baixo
+        st.write("")
         
-        # Insira a senha que você deseja usar para os operadores
-        senha_correta = senha_correta = st.secrets["PASSWORD_SISTEMA"]  
-        
-        senha_digitada = st.text_input("Digite a senha de acesso:", type="password")
-        btn_entrar = st.button("Entrar no Sistema", use_container_width=True)
-        
-        if btn_entrar:
-            if senha_digitada == senha_correta:
-                st.session_state["autenticado"] = True
-                st.success("Acesso autorizado! Carregando...")
-                st.rerun()
-            else:
-                st.error("Senha incorreta. Tente novamente.")
-        st.markdown('</div>', unsafe_allow_html=True)
+        # Um contêiner com borda simulada para parecer um cartão de login
+        with st.container(border=True):
+            # Cabeçalho elegante
+            st.markdown("<h2 style='text-align: center; margin-bottom: 0;'>🔒 Acesso Restrito</h2>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; color: gray; margin-bottom: 25px;'>Vigilância em Saúde — Controle de Estoque</p>", unsafe_allow_html=True)
+            
+            # Campo de entrada de dados integrado
+            senha = st.text_input("Digite a senha de acesso para continuar:", type="password", placeholder="Sua senha secreta")
+            
+            st.write("") # Pequeno espaçamento antes do botão
+            
+            # Botão centralizado ou expandido que ocupa a largura total
+            if st.button("Entrar no Sistema", use_container_width=True, type="primary"):
+                if senha == senha_correta:
+                    st.session_state["autenticado"] = True
+                    st.success("Autenticado com sucesso! Carregando...")
+                    st.rerun()
+                else:
+                    st.error("Senha incorreta. Verifique os caracteres e tente novamente.")
 
-# Inicializa a variável de controle da sessão
-if "autenticado" not in st.session_state:
+# --- CONTROLE DE SESSÃO ---
+if "autenticado" not in st.session_state: 
     st.session_state["autenticado"] = False
 
-# Se NÃO estiver autenticado, exibe a tela de login e encerra o script por aqui
 if not st.session_state["autenticado"]:
     realizar_login()
-    st.stop()  # Impede o restante do código de rodar na página
+    st.stop() # Interrompe a execução do restante do app se não logar
+
+# --- RESTANTE DO SEU CÓDIGO DO SISTEMA ---
+st.title("🎉 Bem-vindo ao Painel Principal!")
 
 # ==============================================================================
 # SE O USUÁRIO FOR AUTENTICADO, O RESTANTE DO SEU CÓDIGO RODA DAQUI PARA BAIXO
