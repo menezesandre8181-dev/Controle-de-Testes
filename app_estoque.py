@@ -115,11 +115,11 @@ menu = st.sidebar.radio("Menu de Navegação", [
 
 # --- 6. LÓGICA DAS TELAS ---
 
-# --- TELA: PAINEL GERAL ---
+# --- TELA: PAINEL GERAL (REFORMULADA COM TOTAIS GERAIS E FILTRO) ---
 if menu == "📊 Painel Geral":
     st.title("📊 Painel Geral de Estoque")
     
-    # Alertas Baseados na Validade
+    # Lógica dos Alertas (Varre os itens com saldo real para alertar vencimentos)
     conn = obter_conexao()
     df_alertas = pd.read_sql('''
         SELECT t.nome, l.validade, l.quantidade_atual, t.unidades_por_caixa
@@ -137,9 +137,9 @@ if menu == "📊 Painel Geral":
         dt_val = txt_para_data(row['validade'])
         caixas_alerta = row['quantidade_atual'] / row['unidades_por_caixa']
         if dt_val < hoje:
-            alertas_vencidos.append(f"❌ **{row['nome']}** — VENCIDO em {data_para_txt(dt_val)} ({caixas_alerta} cx disponíveis)")
+            alertas_vencidos.append(f"❌ **{row['nome']}** — Lote VENCIDO em {data_para_txt(dt_val)} ({caixas_alerta} cx afetadas)")
         elif dt_val <= limite_alerta:
-            alertas_proximos.append(f"⚠️ **{row['nome']}** — Vence em {data_para_txt(dt_val)} ({caixas_alerta} cx restantes)")
+            alertas_proximos.append(f"⚠️ **{row['nome']}** — Lote vence em {data_para_txt(dt_val)} ({caixas_alerta} cx próximas do vencimento)")
             
     if alertas_vencidos:
         with st.error("🚨 PRODUTOS VENCIDOS NO ESTOQUE DETECTADOS:"):
@@ -148,29 +148,37 @@ if menu == "📊 Painel Geral":
         with st.warning("⏳ PRODUTOS COM VENCIMENTO PRÓXIMO (MENOS DE 30 DIAS):"):
             for item in alertas_proximos: st.write(item)
             
-    st.write("### Saldos Atuais Disponíveis")
+    st.write("### Totais Consolidados em Estoque")
+    
+    # Campo de filtro para o usuário digitar
+    filtro_busca = st.text_input("🔍 Filtrar teste pelo nome:", placeholder="Ex: HIV, SÍFILIS...").upper().strip()
+    
+    # Query que traz TODOS os testes cadastrados (LEFT JOIN) agrupando e somando os totais brutos
     conn = obter_conexao()
-    query = '''
+    query_totais = '''
         SELECT t.nome as "Nome do Teste", 
-               l.quantidade_atual as "Total Unidades", 
-               t.unidades_por_caixa as "Un/Caixa",
-               l.validade as "Data de Validade"
-        FROM lotes l
-        JOIN testes t ON t.id = l.teste_id
-        WHERE l.quantidade_atual > 0
-        ORDER BY l.validade ASC
+               TOTAL(l.quantidade_atual) as "total_unidades", 
+               t.unidades_por_caixa as "un_por_caixa"
+        FROM testes t
+        LEFT JOIN lotes l ON t.id = l.teste_id AND l.quantidade_atual > 0
+        GROUP BY t.id, t.nome, t.unidades_por_caixa
+        ORDER BY t.nome ASC
     '''
-    df = pd.read_sql(query, conn)
+    df_totais = pd.read_sql(query_totais, conn)
     conn.close()
     
-    if df.empty:
-        st.info("O estoque está completamente vazio no momento.")
+    if df_totais.empty:
+        st.info("Nenhum tipo de teste cadastrado no sistema ainda.")
     else:
-        df['Qtd em Caixas'] = df['Total Unidades'] / df['Un/Caixa']
-        df['Data de Validade'] = df['Data de Validade'].apply(lambda x: data_para_txt(txt_para_data(x)))
+        # Calcula o saldo consolidado final traduzido direto para Caixas
+        df_totais['Total em Caixas'] = df_totais['total_unidades'] / df_totais['un_por_caixa']
         
-        colunas_ordenadas = ["Nome do Teste", "Qtd em Caixas", "Data de Validade"]
-        st.dataframe(df[colunas_ordenadas], use_container_width=True, hide_index=True)
+        # Aplica o filtro de busca caso o usuário tenha digitado algo
+        if filtro_busca:
+            df_totais = df_totais[df_totais['Nome do Teste'].str.contains(filtro_busca, na=False)]
+            
+        colunas_exibicao = ["Nome do Teste", "Total em Caixas"]
+        st.dataframe(df_totais[colunas_exibicao], use_container_width=True, hide_index=True)
 
 
 # --- TELA: NOVO TESTE ---
@@ -246,7 +254,6 @@ elif menu == "📥 Entrada de Estoque":
                 
                 conn = obter_conexao()
                 cursor = conn.cursor()
-                # Salva como 'ESTOQUE GERAL' no campo de origem do banco apenas para manter a integridade da tabela
                 cursor.execute('''
                     INSERT INTO lotes (teste_id, quantidade_inicial, quantidade_atual, data_entrada, origem, validade)
                     VALUES (?, ?, ?, ?, 'ESTOQUE GERAL', ?)
@@ -257,7 +264,7 @@ elif menu == "📥 Entrada de Estoque":
                 st.success(f"🎉 Lançamento realizado! {qtd_caixas} caixas ({total_unidades_calculado} unidades) inseridas com sucesso.")
 
 
-# --- TELA: SAÍDA (ORDENADO POR VENCIMENTO, SEM CAMPO DE LOTE) ---
+# --- TELA: SAÍDA (DISTRIBUIÇÃO) ---
 elif menu == "📤 Saída (Distribuição)":
     st.title("📤 Registrar Saída por Número de Caixas")
     
@@ -359,7 +366,7 @@ elif menu == "✏️ Editar e Apagar":
     with aba_lotes:
         conn = obter_conexao()
         query_lotes = """
-            SELECT l.id, t.nome as teste, l.quantidade_atual, l.validade, t.unidades_por_caixa 
+            SELECT l.id, t.nome as test, l.quantidade_atual, l.validade, t.unidades_por_caixa 
             FROM lotes l JOIN testes t ON t.id = l.teste_id ORDER BY t.nome, l.validade
         """
         df_lotes = pd.read_sql(query_lotes, conn)
@@ -368,8 +375,7 @@ elif menu == "✏️ Editar e Apagar":
         if df_lotes.empty:
             st.warning("Nenhum registro localizado no banco de dados.")
         else:
-            # Lista as opções de edição ocultando o lote e focando no nome e validade
-            lista_opcoes = [f"ID {row['id']} - {row['teste']} (Vence em: {data_para_txt(txt_para_data(row['validade']))}) | Saldo: {row['quantidade_atual']/row['unidades_por_caixa']} cx" for _, row in df_lotes.iterrows()]
+            lista_opcoes = [f"ID {row['id']} - {row['test']} (Vence em: {data_para_txt(txt_para_data(row['validade']))}) | Saldo: {row['quantidade_atual']/row['unidades_por_caixa']} cx" for _, row in df_lotes.iterrows()]
             selecionado = st.selectbox("Selecione o registro que deseja gerenciar:", lista_opcoes, key="sel_lote")
             
             lote_id = int(selecionado.split(" ")[1])
@@ -395,7 +401,7 @@ elif menu == "✏️ Editar e Apagar":
                         """, (nova_qtd, data_bd_salvar, lote_id))
                         conn.commit()
                         conn.close()
-                        st.success("Registro atualizado com sucesso!")
+                        st.success("Registro updated com sucesso!")
                         st.rerun()
 
             with col_del:
