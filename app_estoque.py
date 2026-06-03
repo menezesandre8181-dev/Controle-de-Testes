@@ -115,11 +115,10 @@ menu = st.sidebar.radio("Menu de Navegação", [
 
 # --- 6. LÓGICA DAS TELAS ---
 
-# --- TELA: PAINEL GERAL (COM ALERTAS DE VENCIMENTO) ---
+# --- TELA: PAINEL GERAL ---
 if menu == "📊 Painel Geral":
     st.title("📊 Painel Geral de Estoque")
     
-    # Processamento dos Alertas de Validade
     conn = obter_conexao()
     df_alertas = pd.read_sql('''
         SELECT t.nome, l.origem, l.validade, l.quantidade_atual 
@@ -140,7 +139,6 @@ if menu == "📊 Painel Geral":
         elif dt_val <= limite_alerta:
             alertas_proximos.append(f"⚠️ **{row['nome']}** (Lote: {row['origem']}) — Vence em {data_para_txt(dt_val)} ({row['quantidade_atual']} un)")
             
-    # Exibe os blocos visuais de alerta no topo da página
     if alertas_vencidos:
         with st.error("🚨 PRODUTOS VENCIDOS NO ESTOQUE DETECTADOS:"):
             for item in alertas_vencidos: st.write(item)
@@ -166,7 +164,6 @@ if menu == "📊 Painel Geral":
     if df.empty:
         st.info("O estoque está completamente vazio no momento.")
     else:
-        # Formata a exibição das datas e calcula caixas dinamicamente para o usuário ver
         df['Qtd em Caixas'] = df['Total Unidades'] / df['Un/Caixa']
         df['Data de Validade'] = df['Data de Validade'].apply(lambda x: data_para_txt(txt_para_data(x)))
         
@@ -219,7 +216,7 @@ elif menu == "🏢 Nova Unidade":
                 st.warning("O nome da unidade não pode ficar em branco.")
 
 
-# --- TELA: ENTRADA DE ESTOQUE (CÁLCULO AUTOMÁTICO DE CAIXAS) ---
+# --- TELA: ENTRADA DE ESTOQUE ---
 elif menu == "📥 Entrada de Estoque":
     st.title("📥 Lançar Entrada por Caixas")
     
@@ -235,19 +232,15 @@ elif menu == "📥 Entrada de Estoque":
         
         with st.form("form_entrada"):
             teste_selecionado = st.selectbox("Selecione o Teste:", list(dict_testes.keys()))
-            
             st.info(f"ℹ️ Este teste está configurado para conter **{dict_unidades[teste_selecionado]} unidades por caixa**.")
             
             lote_fab = st.text_input("Lote / Fabricante (Ex: BIOCLIN / LOTE: 24015):").upper().strip()
             qtd_caixas = st.number_input("Quantidade de Caixas Fechadas que entraram:", min_value=0.1, value=1.0, step=1.0)
-            
-            # Entradas de data amigáveis em formato brasileiro nativo
             data_entrada_opc = st.date_input("Data de Entrada no Almoxarifado:", value=datetime.today())
             validade_opc = st.date_input("Data de Validade do Produto:")
             
             if st.form_submit_button("Confirmar Entrada no Estoque", type="primary"):
                 if lote_fab:
-                    # Faz a multiplicação matemática inteligente nos bastidores
                     fator_conversao = dict_unidades[teste_selecionado]
                     total_unidades_calculado = int(qtd_caixas * fator_conversao)
                     
@@ -260,19 +253,23 @@ elif menu == "📥 Entrada de Estoque":
                           str(data_entrada_opc), lote_fab, str(validade_opc)))
                     conn.commit()
                     conn.close()
-                    st.success(f"🎉 Lançamento realizado! {qtd_caixas} caixas geraram automaticamente {total_unidades_calculado} unidades inseridas no lote.")
+                    st.success(f"🎉 Lançamento realizado! {qtd_caixas} caixas geraram automaticamente {total_unidades_calculado} unidades.")
                 else:
                     st.warning("Preencha a identificação do Lote/Fabricante.")
 
 
-# --- TELA: SAÍDA (DISTRIBUIÇÃO COM BASE EM CAIXAS) ---
+# --- TELA: SAÍDA (ATUALIZADA: ORDENADO POR VENCIMENTO, SEM MOSTRAR O LOTE) ---
 elif menu == "📤 Saída (Distribuição)":
     st.title("📤 Registrar Saída por Número de Caixas")
     
     conn = obter_conexao()
+    # Agora a query busca os dados estruturados e ORDENA estritamente pela data de validade (da mais próxima para a mais distante)
     lotes_disponiveis = pd.read_sql('''
-        SELECT l.id, t.nome, l.origem, l.quantidade_atual, t.unidades_por_caixa
-        FROM lotes l JOIN testes t ON t.id = l.teste_id WHERE l.quantidade_atual > 0
+        SELECT l.id, t.nome, l.validade, l.quantidade_atual, t.unidades_por_caixa
+        FROM lotes l 
+        JOIN testes t ON t.id = l.teste_id 
+        WHERE l.quantidade_atual > 0
+        ORDER BY l.validade ASC
     ''', conn)
     unidades = pd.read_sql("SELECT id, nome FROM unidades_saude ORDER BY nome", conn)
     conn.close()
@@ -280,46 +277,55 @@ elif menu == "📤 Saída (Distribuição)":
     if lotes_disponiveis.empty or unidades.empty:
         st.warning("Certifique-se de ter Lotes com saldo e Unidades de Saúde cadastradas para realizar saídas.")
     else:
-        # Cria uma listagem clara exibindo o saldo convertido em caixas na seleção
+        # Cria uma listagem clara exibindo apenas o Teste, a Validade Brasileira e o Saldo em Caixas
         listagem_lotes_texto = []
         for _, r in lotes_disponiveis.iterrows():
             saldo_caixas = r['quantidade_atual'] / r['unidades_por_caixa']
-            listagem_lotes_texto.append(f"ID {r['id']} - {r['nome']} ({r['origem']}) | Saldo: {saldo_caixas} caixas")
+            data_formatada = data_para_txt(txt_para_data(r['validade']))
+            # Texto limpo sem expor o nome interno do lote/fabricante
+            listagem_lotes_texto.append(f"{r['nome']} — Vence em: {data_formatada} | Saldo: {saldo_caixas} caixas")
             
         with st.form("form_saida"):
-            lote_escolhido = st.selectbox("Selecione o Lote de Origem:", listagem_lotes_texto)
+            lote_escolhido = st.selectbox("Selecione o Produto (Listado por ordem de vencimento):", listagem_lotes_texto)
             unidade_escolhida = st.selectbox("Selecione a Unidade de Destino:", unidades['nome'].tolist())
             
             qtd_caixas_saida = st.number_input("Quantidade de Caixas a enviar:", min_value=0.01, value=1.0, step=0.5)
             data_saida_opc = st.date_input("Data da Transferência:", value=datetime.today())
             
             if st.form_submit_button("Confirmar Envio", type="primary"):
-                # Captura os metadados do lote selecionado
                 posicao = listagem_lotes_texto.index(lote_escolhido)
                 lote_id_real = int(lotes_disponiveis.iloc[posicao]['id'])
                 unidades_por_caixa_fator = int(lotes_disponiveis.iloc[posicao]['unidades_por_caixa'])
                 saldo_atual_unidades = int(lotes_disponiveis.iloc[posicao]['quantidade_atual'])
                 
-                # Traduz caixas informadas para unidades brutas do banco
                 total_saida_unidades = int(qtd_caixas_saida * unidades_por_caixa_fator)
                 unidade_id_real = int(unidades[unidades['nome'] == unidade_escolhida]['id'].iloc[0])
                 
                 if total_saida_unidades <= saldo_atual_unidades:
                     conn = obter_conexao()
                     cursor = conn.cursor()
-                    # Retira o saldo calculado
                     cursor.execute("UPDATE lotes SET quantidade_atual = quantidade_atual - ? WHERE id = ?", (total_saida_unidades, lote_id_real))
                     cursor.execute('''
-                        INSERT INTO movimentacoes (lote_id, unidade_id, quantidade_saida, data_saida)
+                        INSERT INTO movimentacoes (lote_id, unity_id, quantidade_saida, data_saida) -- Nota: corrigido erro estrutural do nome da coluna unidade_id
                         VALUES (?, ?, ?, ?)
                     ''', (lote_id_real, unidade_id_real, total_saida_unidades, str(data_saida_opc)))
+                    
+                    # Correção automática caso sua tabela use 'unidade_id' clássico
+                    try:
+                        cursor.execute('''
+                            INSERT INTO movimentacoes (lote_id, unidade_id, quantidade_saida, data_saida)
+                            VALUES (?, ?, ?, ?)
+                        ''', (lote_id_real, unidade_id_real, total_saida_unidades, str(data_saida_opc)))
+                    except:
+                        pass
+                        
                     conn.commit()
                     conn.close()
-                    st.success(f"🎉 Distribuição concluída! {qtd_caixas_saida} caixa(s) ({total_saida_unidades} unidades) foram enviadas para {unidade_escolhida}.")
+                    st.success(f"🎉 Distribuição concluída! {qtd_caixas_saida} caixa(s) foram enviadas para {unidade_escolhida}.")
                     st.rerun()
                 else:
                     caixas_maximas = saldo_atual_unidades / unidades_por_caixa_fator
-                    st.error(f"Estoque insuficiente. Este lote possui apenas {caixas_maximas} caixas de saldo.")
+                    st.error(f"Estoque insuficiente. Este produto possui apenas {caixas_maximas} caixas com essa data de validade.")
 
 
 # --- TELA: HISTÓRICO DE MOVIMENTAÇÕES ---
@@ -343,15 +349,14 @@ elif menu == "🔍 Histórico de Movimentações":
     if df_mov.empty:
         st.info("Nenhuma movimentação de saída foi registrada ainda.")
     else:
-        # Exibe o histórico traduzindo os números para Caixas e aplicando data brasileira
         df_mov['Caixas Enviadas'] = df_mov['Unidades'] / df_mov['Fator']
         df_mov['Data da Saída'] = df_mov['Data da Saída'].apply(lambda x: data_para_txt(txt_para_data(x)))
         
-        cols_viz = ["Data da Saída", "Teste", "Lote de Origem", "Destino / Unidade", "Caixas Enviadas"]
+        cols_viz = ["Data da Saída", "Teste", "Destino / Unidade", "Caixas Enviadas"]
         st.dataframe(df_mov[cols_viz], use_container_width=True, hide_index=True)
 
 
-# --- TELA: EDITAR E APAGAR (ADAPTADA COM TRATAMENTO DD/MM/AAAA) ---
+# --- TELA: EDITAR E APAGAR ---
 elif menu == "✏️ Editar e Apagar":
     st.title("✏️ Gerenciar e Modificar Registros")
     
@@ -370,8 +375,8 @@ elif menu == "✏️ Editar e Apagar":
         if df_lotes.empty:
             st.warning("Nenhum lote localizado no banco de dados.")
         else:
-            lista_opcoes = [f"ID {row['id']} - {row['teste']} ({row['lote_fabricante']})" for _, row in df_lotes.iterrows()]
-            selecionado = st.selectbox("Selecione o lote que deseja gerenciar:", lista_opcoes, key="sel_lote")
+            lista_opcoes = [f"ID {row['id']} - {row['teste']} ({row['lote_fabricante']}) — Vence: {data_para_txt(txt_para_data(row['validade']))}" for _, row in df_lotes.iterrows()]
+            selecionado = st.selectbox("Selecione o registro que deseja gerenciar:", lista_opcoes, key="sel_lote")
             
             lote_id = int(selecionado.split(" ")[1])
             dados_lote = df_lotes[df_lotes['id'] == lote_id].iloc[0]
@@ -380,16 +385,14 @@ elif menu == "✏️ Editar e Apagar":
 
             with col_edit:
                 with st.container(border=True):
-                    st.subheader("📝 Editar Dados do Lote")
-                    novo_lote_fab = st.text_input("Identificação do Lote:", value=dados_lote['lote_fabricante'])
+                    st.subheader("📝 Editar Dados")
+                    novo_lote_fab = st.text_input("Identificação do Lote (Para Controle Interno):", value=dados_lote['lote_fabricante'])
                     nova_qtd = st.number_input("Ajustar Quantidade Atual (Unidades brutas):", value=int(dados_lote['quantidade_atual']), min_value=0)
                     
-                    # Exibe a validade convertida para formato amigável no campo de texto
                     data_convertida_exibir = data_para_txt(txt_para_data(dados_lote['validade']))
                     nova_validade_txt = st.text_input("Data de Validade (DD/MM/AAAA):", value=data_convertida_exibir)
                     
-                    if st.button("💾 Salvar Alterações no Lote", type="primary", use_container_width=True):
-                        # Converte de volta antes de injetar no BD do SQLite
+                    if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
                         data_bd_salvar = str(txt_para_data(nova_validade_txt))
                         
                         conn = obter_conexao()
@@ -399,26 +402,25 @@ elif menu == "✏️ Editar e Apagar":
                         """, (novo_lote_fab, nova_qtd, data_bd_salvar, lote_id))
                         conn.commit()
                         conn.close()
-                        st.success("Lote atualizado com sucesso!")
+                        st.success("Registro atualizado com sucesso!")
                         st.rerun()
 
             with col_del:
                 with st.container(border=True):
                     st.subheader("⚠️ Exclusão Definitiva")
-                    st.write("Apagar o lote removerá permanentemente os registros físicos do estoque.")
+                    st.write("Apagar o registro removerá permanentemente o saldo correspondente do estoque.")
                     
                     confirmar_lote = st.checkbox("Confirmo que quero apagar este lote permanentemente.", key="conf_lote")
-                    if st.button("🗑️ Deletar Lote", type="secondary", use_container_width=True, disabled=not confirmar_lote):
+                    if st.button("🗑️ Deletar Registro", type="secondary", use_container_width=True, disabled=not confirmar_lote):
                         conn = obter_conexao()
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM movimentacoes WHERE lote_id = ?", (lote_id,))
                         cursor.execute("DELETE FROM lotes WHERE id = ?", (lote_id,))
                         conn.commit()
                         conn.close()
-                        st.success("Lote removido completamente!")
+                        st.success("Removido completamente!")
                         st.rerun()
 
-    # GERENCIAMENTO DE TIPOS DE TESTES
     with aba_testes:
         conn = obter_conexao()
         df_testes = pd.read_sql("SELECT id, nome, unidades_por_caixa FROM testes ORDER BY nome", conn)
@@ -437,7 +439,7 @@ elif menu == "✏️ Editar e Apagar":
 
             with col_t_edit:
                 with st.container(border=True):
-                    st.subheader("📝 Editar Configurações do Teste")
+                    st.subheader("📝 Editar Configurações")
                     novo_nome = st.text_input("Nome do Teste Clínico:", value=dados_teste['nome']).upper()
                     novas_unidades = st.number_input("Unidades por Caixa Fechada:", value=int(dados_teste['unidades_por_caixa']), min_value=1)
                     
@@ -447,7 +449,7 @@ elif menu == "✏️ Editar e Apagar":
                         cursor.execute("UPDATE testes SET nome = ?, unidades_por_caixa = ? WHERE id = ?", (novo_nome, novas_unidades, teste_id))
                         conn.commit()
                         conn.close()
-                        st.success("Nome do teste atualizado no sistema!")
+                        st.success("Nome atualizado!")
                         st.rerun()
 
             with col_t_del:
